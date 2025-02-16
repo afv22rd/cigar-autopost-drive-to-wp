@@ -18,6 +18,11 @@ This Python script automates the process of publishing content from Google Drive
   requests
   ```
 
+Run:
+```
+pip install google-api-python-client requests
+```
+
 ### Configuration
 
 The script requires the following configuration:
