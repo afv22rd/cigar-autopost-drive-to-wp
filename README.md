@@ -16,22 +16,26 @@ This Python script automates the process of publishing content from Google Drive
   google-api-python-client
   google-auth
   requests
+  dotenv
   ```
 
-Run:
+Run the following command to install all packages:
 ```
-pip install google-api-python-client requests
+pip install -r requirements.txt
 ```
+
 
 ### Configuration
 
-The script requires the following configuration:
+#### Set up environmental variables:
+1. Create '.env' file.
+2. Add the following variables
 
 ```
-GOOGLE_CREDENTIALS_FILE = '/path/to/credentials.json'  # Google service account credentials
-WP_URL = 'https://your-wordpress-site.com/wp-json'    # WordPress API endpoint
-WP_USER = 'your_username'                             # WordPress username
-WP_PASSWORD = 'your_password'                         # WordPress application password
+GOOGLE_CREDENTIALS_FILE = /path/to/credentials.json  # Google service account credentials
+WP_URL = https://your-wordpress-site.com/wp-json    # WordPress API endpoint
+WP_USER = your_username                             # WordPress username
+WP_PASSWORD = your_password                         # WordPress application password
 ```
 
 ### Google Sheet Structure
