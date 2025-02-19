@@ -587,4 +587,7 @@ def main(sheet_id):
         print(f"Fatal error: {e}")
 
 if __name__ == '__main__':
-    main('1RFuJl1VAFeeCmJdgtsFvH0ZTV3irataUe2oyvWzwnA0')
+    # The Sheet ID is the long string in the URL of the Google Sheet
+    # In "https://docs.google.com/spreadsheets/d/1RFuJl1VAFeeCmJdgtsFvH0ZTV3irataUe2oyvWzwnA0/edit?gid=0#gid=0", the sheet ID is between d/ and /edit
+    sheetid = input("Enter the Google Sheet ID: ")
+    main(sheetid)
