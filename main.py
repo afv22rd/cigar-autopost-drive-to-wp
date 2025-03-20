@@ -191,17 +191,71 @@ def get_eligible_rows(sheet_id):
                     if photographer_name:
                         print(f"Row {actual_row_num}: Found photographer: {photographer_name}")
 
+            # Get Headlines document URL (Column P)
+            headlines_url = None
+            if len(values) > 15:  # Column P is index 15
+                headlines_cell = values[15]
+                print(f"Row {actual_row_num}: Analyzing headlines cell (Column P):")
+                
+                # Method 1: Try to get URL from textFormatRuns
+                if 'textFormatRuns' in headlines_cell:
+                    for run in headlines_cell['textFormatRuns']:
+                        if 'format' in run and 'link' in run['format']:
+                            headlines_url = run['format']['link']['uri']
+                            print(f"  Found headlines URL from textFormatRuns: {headlines_url}")
+                            break
+
+                # Method 2: Try to get URL from hyperlink property
+                if not headlines_url and 'hyperlink' in headlines_cell:
+                    headlines_url = headlines_cell['hyperlink']
+                    print(f"  Found headlines URL from hyperlink property: {headlines_url}")
+
+                # Method 3: Look for URL patterns in text
+                if not headlines_url and 'formattedValue' in headlines_cell:
+                    url_match = re.search(r'https?://[^\s]+', headlines_cell['formattedValue'])
+                    if url_match:
+                        headlines_url = url_match.group()
+                        print(f"  Found headlines URL from text pattern: {headlines_url}")
+            
+            # Get Cutlines document URL (Column Q)
+            cutlines_url = None
+            if len(values) > 16:  # Column Q is index 16
+                cutlines_cell = values[16]
+                print(f"Row {actual_row_num}: Analyzing cutlines cell (Column Q):")
+                
+                # Method 1: Try to get URL from textFormatRuns
+                if 'textFormatRuns' in cutlines_cell:
+                    for run in cutlines_cell['textFormatRuns']:
+                        if 'format' in run and 'link' in run['format']:
+                            cutlines_url = run['format']['link']['uri']
+                            print(f"  Found cutlines URL from textFormatRuns: {cutlines_url}")
+                            break
+
+                # Method 2: Try to get URL from hyperlink property
+                if not cutlines_url and 'hyperlink' in cutlines_cell:
+                    cutlines_url = cutlines_cell['hyperlink']
+                    print(f"  Found cutlines URL from hyperlink property: {cutlines_url}")
+
+                # Method 3: Look for URL patterns in text
+                if not cutlines_url and 'formattedValue' in cutlines_cell:
+                    url_match = re.search(r'https?://[^\s]+', cutlines_cell['formattedValue'])
+                    if url_match:
+                        cutlines_url = url_match.group()
+                        print(f"  Found cutlines URL from text pattern: {cutlines_url}")
+
             # Add to eligible rows
             print(f"Row {actual_row_num}: Adding to eligible rows (Section: {current_section})")
             eligible_rows.append({
                 'row': actual_row_num,
                 'doc_url': story_url,
-                'image_url': image_url,  # Add the image URL from Column N
+                'image_url': image_url,
+                'headlines_url': headlines_url,
+                'cutlines_url': cutlines_url,
                 'author_names': author_names,
                 'categories': categories,
                 'photographer_name': photographer_name,
                 'online_cell': f"D{actual_row_num}",
-                'section': current_section  # Store the section with each row
+                'section': current_section
             })
 
         except Exception as e:
@@ -210,37 +264,333 @@ def get_eligible_rows(sheet_id):
 
     return eligible_rows
 
-def parse_google_doc(doc_id):
-    """Extract sections from Google Doc with improved parsing."""
-    doc = docs_service.documents().get(documentId=doc_id).execute()
-    content = doc['body']['content']
-
-    sections = {
-        'Headline': '',
-        'Featured image': '',
-        'Cutlines': '',
-        'Redaction': '',
-    }
-
-    current_section = None
-
-    for element in content:
-        if 'paragraph' in element:
-            elements = element['paragraph']['elements']
-            text = ''.join([e.get('textRun', {}).get('content', '') for e in elements]).strip()
-
-            # Check for section headers
-            for section in sections:
-                header_pattern = f"{section}:"
-                if text.startswith(header_pattern):
-                    current_section = section
-                    sections[current_section] = text[len(header_pattern):].strip()
+def parse_redaction_doc(doc_id):
+    """
+    Parse redaction document with interactive line selection.
+    Shows first 9 lines and lets user select where redaction starts.
+    """
+    # ANSI color codes for terminal output
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    ENDC = "\033[0m"
+    BOLD = "\033[1m"
+    
+    try:
+        # Fetch the Google Doc content
+        doc = docs_service.documents().get(documentId=doc_id).execute()
+        content = doc['body']['content']
+        
+        # Extract all lines from the document
+        all_lines = []
+        
+        for element in content:
+            if 'paragraph' in element:
+                elements = element['paragraph']['elements']
+                text = ''.join([e.get('textRun', {}).get('content', '') for e in elements])
+                all_lines.append(text.strip())
+        
+        # Remove any empty lines at the beginning
+        while all_lines and not all_lines[0]:
+            all_lines.pop(0)
+            
+        if not all_lines:
+            print(f"{YELLOW}Warning: Document appears to be empty{ENDC}")
+            return ""
+        
+        # Display first 9 lines (or fewer if document has fewer lines)
+        display_lines = min(9, len(all_lines))
+        
+        print(f"\n{BLUE}{BOLD}First {display_lines} lines of the redaction document:{ENDC}")
+        for i in range(display_lines):
+            # Truncate long lines
+            display_text = all_lines[i][:100] + "..." if len(all_lines[i]) > 100 else all_lines[i]
+            print(f"{i+1}. {display_text}")
+        
+        # Prompt for redaction start line
+        print(f"\n{BOLD}Where does the redaction start?{ENDC} (default: line 4)")
+        print(f"Press {GREEN}SPACEBAR{ENDC} for default (line 4) or enter a line number:")
+        
+        # Get user input
+        user_input = ""
+        start_line = 4  # Default value
+        
+        while True:
+            char = get_single_key()
+            if char == ' ':  # Spacebar = default
+                print(f"Using default starting line: {start_line}")
+                break
+            elif char in ['\r', '\n']:  # Enter = use current input
+                if user_input.isdigit() and 1 <= int(user_input) <= len(all_lines):
+                    start_line = int(user_input)
+                    print(f"Using starting line: {start_line}")
                     break
-            else:
-                if current_section and text:
-                    sections[current_section] += "\n" + text
+                elif user_input == "":
+                    print(f"Using default starting line: {start_line}")
+                    break
+                else:
+                    print(f"{YELLOW}Invalid input. Please enter a valid line number (1-{len(all_lines)}):{ENDC}")
+                    user_input = ""
+            elif char.isdigit():
+                user_input += char
+                print(char, end="", flush=True)
+            elif char in ['\b', '\x08', '\x7f']:  # Backspace
+                if user_input:
+                    user_input = user_input[:-1]
+                    print("\b \b", end="", flush=True)
+            
+        # Create redaction from selected line to end
+        start_idx = start_line - 1  # Convert to 0-based index
+        redaction = '\n'.join([line for line in all_lines[start_idx:] if line])
+        
+        # For preview purposes, show the first few lines of redaction
+        preview_lines = redaction.split('\n')[:3]
+        preview_text = '\n'.join(preview_lines)
+        if len(preview_lines) < len(redaction.split('\n')):
+            preview_text += "\n..."
+        
+        print(f"\n{BOLD}Redaction content:{ENDC}")
+        print(f"{preview_text}")
+        
+        return redaction
+        
+    except Exception as e:
+        print(f"Error parsing redaction document: {str(e)}")
+        return f"Error parsing document: {str(e)}"
+    
+def parse_headlines_doc(doc_id):
+    """
+    Parse headlines document and return a list of headline options.
+    Format expected: "**SLUG - **HEADLINE"
+    """
+    # ANSI color codes for terminal output
+    YELLOW = "\033[93m"
+    ENDC = "\033[0m"
+    
+    try:
+        # Fetch the Google Doc content
+        doc = docs_service.documents().get(documentId=doc_id).execute()
+        content = doc['body']['content']
+        
+        # Extract all lines from the document
+        all_lines = []
+        
+        for element in content:
+            if 'paragraph' in element:
+                elements = element['paragraph']['elements']
+                text = ''.join([e.get('textRun', {}).get('content', '') for e in elements])
+                if text.strip():  # Only append non-empty lines
+                    all_lines.append(text.strip())
+        
+        # Extract headlines using the specific pattern
+        headlines = []
+        pattern = re.compile(r'\*\*(.*?)\s*-\s*\*\*(.*?)(?=$|\*\*)', re.DOTALL)
+        
+        # Process each line in the document
+        for line in all_lines:
+            # Find all matches in this line
+            matches = pattern.finditer(line)
+            for match in matches:
+                slug = match.group(1).strip()
+                headline = match.group(2).strip()
+                headlines.append({
+                    'slug': slug,
+                    'headline': headline,
+                    'original': f"**{slug} - **{headline}"
+                })
+        
+        # Also check for pattern across the whole document text
+        full_text = ' '.join(all_lines)
+        matches = pattern.finditer(full_text)
+        for match in matches:
+            slug = match.group(1).strip()
+            headline = match.group(2).strip()
+            found = False
+            # Check if this headline is already in our list
+            for existing in headlines:
+                if existing['slug'] == slug and existing['headline'] == headline:
+                    found = True
+                    break
+            if not found:
+                headlines.append({
+                    'slug': slug,
+                    'headline': headline,
+                    'original': f"**{slug} - **{headline}"
+                })
+        
+        # Clean up headlines - fix "SH:" pattern
+        for headline_item in headlines:
+            # Replace "SH:" with ": " pattern
+            headline_item['headline'] = re.sub(r'\s*SH:\s*', ': ', headline_item['headline'])
+            # Remove extra colons if they exist after replacing SH:
+            headline_item['headline'] = re.sub(r':\s*:', ':', headline_item['headline'])
+        
+        print(f"Found {len(headlines)} potential headlines in document")
+        return headlines
+        
+    except Exception as e:
+        print(f"Error parsing headlines document: {str(e)}")
+        return []
 
-    return sections
+def parse_cutlines_doc(doc_id):
+    """
+    Parse cutlines document and return a list of cutline options.
+    Format expected: "- SLUG: cutline text"
+    """
+    # ANSI color codes for terminal output
+    YELLOW = "\033[93m"
+    ENDC = "\033[0m"
+    
+    try:
+        # Fetch the Google Doc content
+        doc = docs_service.documents().get(documentId=doc_id).execute()
+        content = doc['body']['content']
+        
+        # Extract all lines from the document
+        all_lines = []
+        
+        for element in content:
+            if 'paragraph' in element:
+                elements = element['paragraph']['elements']
+                text = ''.join([e.get('textRun', {}).get('content', '') for e in elements])
+                if text.strip():  # Only append non-empty lines
+                    all_lines.append(text.strip())
+        
+        # Extract cutlines which typically start with "- " or directly with a slug followed by ":"
+        cutlines = []
+        pattern = re.compile(r'-?\s*(.*?):\s*(.*?)(?=$|-\s*\w+:|$)', re.DOTALL)
+        
+        # Process each line in the document
+        for line in all_lines:
+            # Find all matches in this line
+            matches = pattern.finditer(line)
+            for match in matches:
+                slug = match.group(1).strip()
+                cutline = match.group(2).strip()
+                if cutline:  # Only add if there's actual cutline text
+                    cutlines.append({
+                        'slug': slug,
+                        'cutline': cutline,
+                        'original': f"{slug}: {cutline}"
+                    })
+        
+        # Also scan multi-line cutlines
+        full_text = '\n'.join(all_lines)
+        matches = pattern.finditer(full_text)
+        for match in matches:
+            slug = match.group(1).strip()
+            cutline = match.group(2).strip()
+            if cutline:
+                found = False
+                # Check if this cutline is already in our list
+                for existing in cutlines:
+                    if existing['slug'] == slug and existing['cutline'] == cutline:
+                        found = True
+                        break
+                if not found:
+                    cutlines.append({
+                        'slug': slug,
+                        'cutline': cutline,
+                        'original': f"{slug}: {cutline}"
+                    })
+        
+        print(f"Found {len(cutlines)} potential cutlines in document")
+        return cutlines
+        
+    except Exception as e:
+        print(f"Error parsing cutlines document: {str(e)}")
+        return []
+
+def select_headline_interactively(headlines, row_info, redaction_preview):
+    """
+    Present headline options to user for interactive selection.
+    Returns the selected headline text.
+    """
+    # ANSI color codes for terminal output
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    ENDC = "\033[0m"
+    BOLD = "\033[1m"
+    
+    # If no headlines found
+    if not headlines:
+        print(f"{YELLOW}No headline options found. Please enter a headline manually:{ENDC}")
+        return input("Headline: ").strip()
+    
+    print(f"\n{BLUE}{BOLD}Processing row {row_info['row']} (Section: {row_info['section']}){ENDC}")
+    print(f"\n{BOLD}Redaction preview:{ENDC}")
+    print(f"{redaction_preview[:150]}...")
+    
+    print(f"\n{BOLD}What is the headline of this post?{ENDC}")
+    
+    # Assign letters A, B, C, etc. to each headline
+    choices = {}
+    for idx, headline in enumerate(headlines):
+        letter = chr(65 + idx)  # A=65, B=66, etc.
+        if idx < 26:  # Only support up to 26 options (A-Z)
+            choices[letter] = headline
+            print(f"{BOLD}{letter}. {headline['original']}{ENDC}")
+    
+    print(f"\n{YELLOW}Enter letter choice (A-{chr(64 + len(choices))}) or type a custom headline:{ENDC}")
+    
+    user_input = input("> ").strip()
+    
+    # Check if the input is a valid letter choice
+    if user_input.upper() in choices:
+        selected_headline = choices[user_input.upper()]
+        print(f"{GREEN}Selected: {selected_headline['headline']}{ENDC}")
+        return selected_headline['headline']
+    else:
+        # Treat input as custom headline
+        print(f"{GREEN}Using custom headline: {user_input}{ENDC}")
+        return user_input
+
+def select_cutline_interactively(cutlines, headline):
+    """
+    Present cutline options to user for interactive selection.
+    Returns the selected cutline text.
+    """
+    # ANSI color codes for terminal output
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    ENDC = "\033[0m"
+    BOLD = "\033[1m"
+    
+    # If no cutlines found or no image
+    if not cutlines:
+        print(f"{YELLOW}No cutline options found. Enter a cutline or press Enter to skip:{ENDC}")
+        return input("Cutline: ").strip()
+    
+    print(f"\n{BOLD}What is the cutline for the featured image?{ENDC}")
+    print(f"{BLUE}(For headline: {headline}){ENDC}")
+    
+    # Assign letters A, B, C, etc. to each cutline
+    choices = {}
+    for idx, cutline in enumerate(cutlines):
+        letter = chr(65 + idx)  # A=65, B=66, etc.
+        if idx < 26:  # Only support up to 26 options (A-Z)
+            choices[letter] = cutline
+            print(f"{BOLD}{letter}. {cutline['original']}{ENDC}")
+    
+    print(f"\n{YELLOW}Enter letter choice (A-{chr(64 + len(choices))}) or type a custom cutline or press Enter to skip:{ENDC}")
+    
+    user_input = input("> ").strip()
+    
+    if not user_input:
+        print(f"{YELLOW}Skipping cutline.{ENDC}")
+        return ""
+    
+    # Check if the input is a valid letter choice
+    if user_input.upper() in choices:
+        selected_cutline = choices[user_input.upper()]
+        print(f"{GREEN}Selected: {selected_cutline['cutline']}{ENDC}")
+        return selected_cutline['cutline']
+    else:
+        # Treat input as custom cutline
+        print(f"{GREEN}Using custom cutline: {user_input}{ENDC}")
+        return user_input
 
 def get_or_create_author_id(author_name):
     """
@@ -955,6 +1305,10 @@ def main(sheet_id):
     successful_posts = []
     failed_posts = []
     skipped_posts = []  # New list to track skipped posts
+
+    # Storage for headline and cutline options
+    headlines_cache = []
+    cutlines_cache = []
     
     # ANSI color codes for terminal output
     GREEN = "\033[92m"
@@ -974,6 +1328,32 @@ def main(sheet_id):
         except Exception as e:
             print(f"{RED}Error getting eligible rows: {e}{ENDC}")
             return
+        
+        # Parse headlines document (from first row's column P)
+        if eligible_rows:
+            first_row = eligible_rows[0]
+            if first_row.get('headlines_url'):
+                print(f"{BLUE}Parsing headlines document...{ENDC}")
+                headlines_doc_match = re.search(r'/document/d/([a-zA-Z0-9_-]+)', first_row['headlines_url'])
+                if headlines_doc_match:
+                    headlines_doc_id = headlines_doc_match.group(1)
+                    headlines_cache = parse_headlines_doc(headlines_doc_id)
+                else:
+                    print(f"{YELLOW}Invalid headlines document URL format.{ENDC}")
+            else:
+                print(f"{YELLOW}No headlines document URL found.{ENDC}")
+                
+            # Parse cutlines document (from first row's column Q)
+            if first_row.get('cutlines_url'):
+                print(f"{BLUE}Parsing cutlines document...{ENDC}")
+                cutlines_doc_match = re.search(r'/document/d/([a-zA-Z0-9_-]+)', first_row['cutlines_url'])
+                if cutlines_doc_match:
+                    cutlines_doc_id = cutlines_doc_match.group(1)
+                    cutlines_cache = parse_cutlines_doc(cutlines_doc_id)
+                else:
+                    print(f"{YELLOW}Invalid cutlines document URL format.{ENDC}")
+            else:
+                print(f"{YELLOW}No cutlines document URL found.{ENDC}")
 
         for row in eligible_rows:
             print(f"\n{BOLD}Loading row {row['row']} (Section: {row['section']}){ENDC}")
@@ -1012,23 +1392,36 @@ def main(sheet_id):
             }
 
             try:
-                # Extract Google Doc ID
+                # Extract Google Doc ID for the redaction document (Column E)
                 doc_match = re.search(r'/document/d/([a-zA-Z0-9_-]+)', row['doc_url'])
                 if not doc_match:
-                    raise ValueError('Invalid Google Doc URL')
+                    raise ValueError('Invalid Google Doc URL for redaction')
                 doc_id = doc_match.group(1)
 
-                # Parse Google Doc
-                sections = parse_google_doc(doc_id)
-
-                # Clean up headline
-                original_headline = sections['Headline']
-                cleaned_headline = re.sub(r'\s*\bSH:?\b\s*:?\s*', ': ', original_headline, flags=re.IGNORECASE)
-                cleaned_headline = ' '.join(cleaned_headline.split()).strip()
-                sections['Headline'] = cleaned_headline
-
-                # Update post info with actual headline
-                post_info['headline'] = sections['Headline']
+                # Parse redaction document interactively
+                redaction = parse_redaction_doc(doc_id)
+                if not redaction:
+                    raise ValueError("Failed to parse redaction document")
+                
+                # Get preview of redaction for headline selection context
+                redaction_preview = ' '.join(redaction.split()[:30])
+                
+                # Now select headline interactively from cached headlines
+                headline = select_headline_interactively(headlines_cache, row, redaction_preview)
+                
+                # Select cutline interactively from cached cutlines
+                cutlines = select_cutline_interactively(cutlines_cache, headline)
+                
+                # Create sections dictionary for compatibility with existing code
+                sections = {
+                    'Headline': headline,
+                    'Redaction': redaction,
+                    'Cutlines': cutlines,
+                    'Featured image': ''
+                }
+                
+                # Update post info with headline
+                post_info['headline'] = headline
 
                 # Handle featured image - now with fallback mechanism
                 featured_media_id = None
