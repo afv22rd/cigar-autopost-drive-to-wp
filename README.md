@@ -1,54 +1,98 @@
-# Google Drive to WordPress Automation
+# CigarAutopost – Google Drive ➜ WordPress Automation
 
-### Overview
-This Python script automates the process of publishing content from Google Drive documents to WordPress. It monitors a Google Sheet for ready-to-publish articles, processes their content from Google Docs, handles featured images, and publishes them to WordPress while managing metadata like authors and categories.
+## Overview
 
-### Prerequisites
+`CigarAutopost` is a **fully-interactive CLI tool** that transforms Google Drive content into fully-formatted WordPress posts. It scans a Google Sheet for rows marked as “Ready To Post”, pulls the associated Google Docs, optionally uploads a featured image from Google Drive, and finally publishes (or drafts) the post on WordPress. Every step is confirmed through a keyboard-driven interface so editors always stay in control.
 
-- Python 3.x
-- Google Cloud Project with enabled APIs:
-  - Google Sheets API
-  - Google Drive API
-  - Google Docs API
-- WordPress site with REST API access
-- Required Python packages:
-  ```
-  google-api-python-client
-  google-auth
-  requests
-  dotenv
-  ```
+## Why another README?
 
-Run the following command to install all packages:
-```
+The project evolved from a single monolithic script to a modular architecture (`google_integration.py`, `wordpress_integration.py`, etc.). This README was rewritten to describe the current code base, required environment variables and the interactive workflow provided by `main.py`.
+
+## Features
+
+* Detect eligible rows in Google Sheets (✅ Ready To Post, ❌ Online).
+* Parse Google Docs for redaction, headline options, cutlines, authors & categories.
+* Interactive terminal wizard to pick headline & cutline and decide to:
+  * Publish (ENTER)
+  * Save as draft (BACKSPACE)
+  * Skip (SPACEBAR)
+  * Abort (ESC)
+* Upload featured images from Google Drive with automatic format validation and retry logic.
+* Create missing authors & categories in WordPress on-the-fly.
+* Update the Google Sheet once the post goes online.
+
+## Folder & Module layout
+
+| File | Responsibility |
+|------|----------------|
+| `constants.py` | Loads environment variables, initialises Google API clients, defines ANSI colours. |
+| `google_integration.py` | Reads & updates Google Sheets, parses Google Docs (redaction, headlines, cutlines). |
+| `image_processing.py` | Downloads images from Drive and uploads them to the WordPress media library with retry logic. |
+| `wordpress_integration.py` | Creates authors, categories and posts through the WordPress REST API. |
+| `user_interface.py` | Handles all terminal I/O – single-key reading and the rich post review screen. |
+| `main.py` | Orchestrates the complete flow; entry point executed by the user. |
+
+## Requirements
+
+```bash
+python >= 3.9
 pip install -r requirements.txt
 ```
 
-
-### Configuration
-
-#### Set up environmental variables:
-1. Create '.env' file.
-2. Add the following variables
+Key packages pinned in `requirements.txt` include (but are not limited to):
 
 ```
-GOOGLE_CREDENTIALS_FILE = /path/to/credentials.json  # Google service account credentials
-WP_URL = https://your-wordpress-site.com/wp-json    # WordPress API endpoint
-WP_USER = your_username                             # WordPress username
-WP_PASSWORD = your_password                         # WordPress application password
+google-api-python-client
+google-auth
+python-dotenv
+requests
 ```
 
-### Google Sheet Structure
+## Configuration (.env)
 
-The script expects a Google Sheet with the following columns:
-- Column B: "Ready To Post" (checkbox)
-- Column C: "Online" (checkbox)
-- Column D: "Story" (Google Doc URL)
-- Column M: "Photographer" (optional)
+Create a `.env` file in the project root:
 
-### Google Doc Structure
+```
+GOOGLE_CREDENTIALS_FILE=/absolute/path/to/service_account.json
+WP_URL=https://your-site.com/wp-json
+WP_USER=your_wp_username
+WP_PASSWORD=application_password_generated_in_wp
+```
 
-Each Google Doc should contain the following sections:
+The credentials file must belong to a **service account** that has access to the target Drive, Docs and Sheets.
+
+## Google Cloud set-up (one-time)
+
+1. Create a Google Cloud project & service account.
+2. Enable the following APIs:
+   * Google Sheets API
+   * Google Drive API
+   * Google Docs API
+3. Share the target Drive folder and the Sheet with the service-account e-mail (viewer/editor access).
+
+## WordPress set-up (one-time)
+
+1. Log in to WordPress as an administrator.
+2. Go to **Users ▸ Profile ▸ Application Passwords** and generate a new token.
+3. Copy the value into `WP_PASSWORD` in your `.env`.
+
+## Spreadsheet layout expected by the script
+
+| Column | Purpose |
+|--------|---------|
+| **B** | Ready To Post (checkbox) |
+| **D** | Online (checkbox) – will be set automatically |
+| **E** | Story: link to Google Doc containing the redaction |
+| **H** | Author(s) (comma-separated) |
+| **N** | Featured image: Google Drive link |
+| **O** | Categories (comma-separated) |
+| **P** | Headlines document (optional) |
+| **Q** | Cutlines document (optional) |
+
+Section headers are read from column **A**. When no categories are supplied, the current section name is used as a fallback.
+
+## Google Doc structure
+
 ```
 Headline:
 Featured image:
@@ -58,94 +102,36 @@ Author(s):
 Categories:
 ```
 
-### Core Features
+Only *Headline* and *Redaction* are strictly required; any missing fields will be prompted for interactively.
 
-1. **Content Eligibility Detection**
-   - Identifies articles ready for publishing
-   - Checks "Ready To Post" status
-   - Verifies article hasn't been published
+## Running
 
-2. **Content Extraction**
-   - Parses Google Doc sections
-   - Handles formatted text and hyperlinks
-   - Processes multiple authors
-   - Extracts category information
+```bash
+$ python main.py
+Enter Google Sheets URL: https://docs.google.com/spreadsheets/d/•••
+```
 
-3. **Image Processing**
-   - Downloads featured images from Google Drive
-   - Uploads images to WordPress media library
-   - Handles image captions and metadata
+After the Sheet ID is validated the interactive wizard starts.
 
-4. **WordPress Integration**
-   - Creates formatted posts
-   - Sets featured images
-   - Assigns authors and categories
-   - Publishes content with proper formatting
+### Keyboard shortcuts inside the wizard
 
-5. **Tracking and Reporting**
-   - Updates Google Sheet status
-   - Provides detailed success/failure reporting
-   - Logs processing steps and errors
+| Key | Action |
+|-----|--------|
+| **ENTER** | Publish the post immediately |
+| **BACKSPACE** | Save the post as a draft |
+| **SPACEBAR** | Skip this row |
+| **ESC** | Terminate the program |
 
-### Key Functions
+## Logs
 
-#### `get_eligible_rows(sheet_id)`
-Retrieves rows from Google Sheet that are ready for publishing.
-- Parameters:
-  - `sheet_id`: ID of the Google Sheet
-- Returns: List of eligible row data
+All operations are printed to stdout with colour coding (green = success, yellow = warning, red = error). At the end of a run a per-section and overall summary is displayed.
 
-#### `parse_google_doc(doc_id)`
-Extracts content sections from Google Doc.
-- Parameters:
-  - `doc_id`: ID of the Google Doc
-- Returns: Dictionary of document sections
+## Limitations
 
-#### `create_wordpress_post(content_data)`
-Creates a new WordPress post with formatted content.
-- Parameters:
-  - `content_data`: Dictionary containing post content and metadata
-- Returns: Boolean indicating success/failure
+* Only one featured image per post is supported.
+* Advanced WordPress blocks/layouts are not generated – the output is simple HTML paragraphs.
+* The tool requires a TTY for interactive controls; it will not run inside non-interactive environments like cron without modification.
 
-#### `upload_image_to_wordpress(image_data, caption, filename)`
-Uploads images to WordPress media library.
-- Parameters:
-  - `image_data`: Binary image data
-  - `caption`: Image caption text
-  - `filename`: Name for the uploaded file
-- Returns: Media ID if successful, None if failed
+## License
 
-### Error Handling
-
-The script includes comprehensive error handling for:
-- Network connectivity issues
-- API rate limits
-- Invalid content formatting
-- Missing permissions
-- File access errors
-- WordPress API failures
-
-### Output and Logging
-
-The script provides detailed console output including:
-- Processing status for each article
-- Image upload confirmations
-- Author and category assignments
-- Success/failure summaries
-- Error details for failed posts
-
-### Limitations
-
-1. Image Support
-   - Only supports direct Google Drive image links
-   - Processes single featured image per post
-
-2. Content Formatting
-   - Basic HTML formatting only
-   - No support for complex layouts
-   - Limited styling options
-
-3. WordPress Integration
-   - Requires WordPress REST API access
-   - Application password authentication
-   - Standard post type only
+MIT
