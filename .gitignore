@@ -1,0 +1,11 @@
+#Ignore environment files
+.env
+
+# Ignore credentials file
+credentials.json
+
+to-do.txt
+
+main2.py
+
+__pycache__/
